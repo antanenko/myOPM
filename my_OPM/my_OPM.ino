@@ -6,7 +6,7 @@
 #include "font.h"
 
 //#define DEBUG
-
+// test git hub from macbook
 
 #define MAX_DIAPAZON 5
 #define NUM_AVERAGE 80
@@ -51,7 +51,7 @@
 #define SPI_SCK 5
 //#define SPI_SS 2
 
-
+// test git hub from macbook
 
 
 
