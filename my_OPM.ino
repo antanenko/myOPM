@@ -17,17 +17,17 @@
 #define CD 12  // PB4
 //#define RESET 8
 
-#define LCDSCK 13
-#define LCDMOSI 11
+#define LCDSCK 13  // PB5
+#define LCDMOSI 11  // PB3
 
-#define buttonH1 15
-#define buttonH2 16
-#define buttonH3 14
+#define buttonH1 14  // PC0
+#define buttonH2 15  // PC1
+#define buttonH3 16  // PC2
 
-#define buttonV1 18
-#define buttonV2 19
+#define buttonV1 17  // PC3
+#define buttonV2 18  // PC4
 
-#define LIGHT  17
+#define LIGHT  8  // PB0
 
 #define kill 7  // PD7
 #define inter 3   // PD3
@@ -38,10 +38,10 @@
 #define N2M  5  // PD5 Select range pins
 #define N20K 6  // PD6
 
-#define VFL  8
+#define VFL  9 //  PB1
 
-#define BEEP 9
-#define PIN_VOLTAGE A7 
+#define BEEP 19  // PC5
+#define PIN_VOLTAGE A7 //   ADC7
 
 #define SPI_PORTX PORTB
 #define SPI_DDRX DDRB
