@@ -5,7 +5,7 @@
 #include <math.h>
 #include "font.h"
 
-//#define DEBUG
+#define DEBUG
 
 
 #define MAX_DIAPAZON 5
@@ -326,7 +326,7 @@ void prev_range()
 volatile int num_aver;
 boolean fl_event;
 volatile boolean fl_int;   // flag interrupt
-volatile boolean flag;
+volatile boolean flag_result_ready;
  
 volatile unsigned long dout,av_dout;
 //-------------------------------------------------------------------
@@ -418,7 +418,7 @@ void fready()
          av_dout = dout / NUM_AVERAGE;
          dout=0;
          num_aver=0;
-         flag = true;   
+         flag_result_ready = true;   
       }  
       
   }
@@ -443,29 +443,21 @@ void setup() {
    Serial.begin(57600);
   
 //   SPI_begin();
-   
-    
   // reserve 20 bytes for the inputString:
-  inputString.reserve(20);
-   
+  inputString.reserve(20); 
    
    pinMode(CS,OUTPUT);  // LCD
    pinMode(CD,OUTPUT); 
 //   pinMode(RESET,OUTPUT);
 
+   pinMode(LCDSCK,OUTPUT); 
+   digitalWrite(LCDSCK,LOW);
+   pinMode(LCDMOSI,OUTPUT); 
 
- pinMode(LCDSCK,OUTPUT); 
- digitalWrite(LCDSCK,LOW);
- 
- pinMode(LCDMOSI,OUTPUT); 
-   
-   
-   
    pinMode(buttonH1,INPUT);
    pinMode(buttonH2,INPUT);
    pinMode(buttonH3,INPUT);
-   
-   
+  
    pinMode(buttonV1,OUTPUT);
    pinMode(buttonV2,OUTPUT);
    digitalWrite(buttonV1,LOW);
@@ -482,30 +474,21 @@ void setup() {
    pinMode(N2M,OUTPUT);   // range
    pinMode(N20K,OUTPUT);
  //  pinMode(NV,OUTPUT); //!!!!!
- 
- 
-//   pinMode(ADCCLK,OUTPUT);
-
- // TCCR0B = TCCR0B & 0b11111000 | 0x01;
-
-//  analogWrite(ADCCLK,128);  // CLK
     
   pinMode(VFL,OUTPUT);
 //  digitalWrite(VFL,LOW);  // TURN ON
  // delay(100);
   digitalWrite(VFL,HIGH);
   
-     digitalWrite(BEEP,LOW);
-     delay(100);
-     digitalWrite(BEEP,HIGH);    
+  digitalWrite(BEEP,LOW);
+  delay(100);
+  digitalWrite(BEEP,HIGH);    
    
-    set_ch(5);
-    
-    num_wave=2;   // 1310
-
-    flag_dBm = false;
+  set_ch(5);
+  num_wave=2;   // 1310
+  flag_dBm = false;
    
-   Lcd_Set();
+  Lcd_Set();
    
  //  delay(200);
    Display_Clear(0x00,0x00);
@@ -514,23 +497,22 @@ void setup() {
  //  delay(200);
  //  Display_Clear(0x00,0x00);
  //  delay(200);
-//   Show_string(0,0,"Power Meter v.1.0");
+   Show_string(0,0,"Power Meter v.1.0");
      
      
  #ifdef DEBUG    
-   Show_string(0,0,"      ");
+   Show_string(0,0,"TEST 12345");
+   while(1){}
+   
    Show_string(0,0,"Rng="+String(n));
 #endif   
 
- 
- 
    Show_string(36,0,"    ");
    Show_string(36,0,String(wave[num_wave]));
-   attachInterrupt(0, fready, RISING);
-   
-   
+  
+   attachInterrupt(digitalPinToInterrupt(DOUT), fready, RISING);
    pinMode(inter,INPUT);
-   attachInterrupt(1, power_off, LOW);  // !!!!
+   attachInterrupt(digitalPinToInterrupt(inter), power_off, LOW);  // !!!!
    
    interrupts();
    
@@ -645,15 +627,15 @@ void loop() {
      fl_event = false;
 
 #ifndef DEBUG
-    if(flag_dBm)
-    {
-      Show_string(0,1,"Pwr="+String(pwr_db,2)+"dBm");
-    }
-    else
-    {
-      Show_string(0,1,"              ");
-    }
- #endif
+      if(flag_dBm)
+      {
+        Show_string(0,1,"Pwr="+String(pwr_db,2)+"dBm");
+      }
+      else
+      {
+        Show_string(0,1,"              ");
+      }
+#endif
      
      
    
@@ -718,7 +700,7 @@ void loop() {
 
   time1 = millis();
   
-  if( (flag) && ((time1-time2)>TIME_UPDATE))  //flag data from adc ready
+  if( (flag_result_ready) && ((time1-time2)>TIME_UPDATE))  //flag_result_ready data from adc ready
   {
     
  #ifdef DEBUG    
@@ -857,7 +839,7 @@ void loop() {
   //   }
      
  
-     flag = false;
+     flag_result_ready = false;
      digitalWrite(LIGHT,HIGH);
      delay(10);
      digitalWrite(LIGHT,LOW);
