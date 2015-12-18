@@ -1,12 +1,22 @@
 
 #include <EEPROM.h>
 #include <avr/pgmspace.h>
-
+#include <TimerOne.h>
 #include <math.h>
 #include "font.h"
 
 #define DEBUG
 
+#define CMD_KEY1               'w'    // change wave
+#define CMD_KEY2               'f'    // VFL
+#define CMD_KEY3               'd'    // dB->dBm
+#define CMD_KEY4               'l'    // BackLight
+#define CMD_KEY5               'z'    // zero
+#define CMD_KEY6               'a'
+#define CMD_CALCULATE_POWER    'p'    // power
+#define CMD_UPDATE_SCREEN      'u'    // update screen
+#define CMD_STORE_COEFF        's'    // save coef
+#define CMD_READ_RESULT        'r'    // read result to Serial port 
 
 #define MAX_DIAPAZON 5
 #define NUM_AVERAGE 80
@@ -52,11 +62,12 @@
 //#define SPI_SS 2
 
 
-
-
+//////////////////////////////////
+#define MAX_CMD_IN_STACK 10
+static unsigned char posCurrent=0;
+static unsigned char stackCmd[MAX_CMD_IN_STACK];
 
 byte n; // number of range
-
 unsigned long time2,time1;
 
 double koef;
@@ -67,12 +78,15 @@ double pwr_db;   //
 String inputString = ""; 
 boolean stringComplete = false;
 
-boolean flag_dBm;
+boolean flag_dBm = false;
+boolean fl_VFL = false; 
+boolean fl_backLight = false;
+boolean fl_key_pressed;
 
-#define MAX_NUM_WAVE 6
+#define MAX_NUM_WAVE 5
 byte num_wave;
-String wave[]={"650","850","1310","1490","1550","1625","VFL"};
-int calibr[]={1060,560,0,-30,-23,34,0};    // 10.6 dB
+String wave[]={"650","850","1310","1490","1550","1625"};
+int calibr[]={1060,560,0,-30,-23,34};    // 10.6 dB
 
 void SPI_begin()
 {
@@ -91,18 +105,13 @@ void SPI_begin()
  
 }  
 ///////////////////////////////////
-
-
-
 void SPI_transfer(unsigned char b)
 {
  //  SPI_PORTX &= ~(1<<SPI_SS);
  //  SPDR = b;
  //  while(!(SPSR & (1<<SPIF)));
  //  SPI_PORTX |= (1<<SPI_SS); 
-   
-
- /* 
+    /* 
   unsigned char i,j;
   j=0x80;
   for(i=0;i<8;i++)
@@ -192,8 +201,7 @@ void Lcd_Set()
      delay(1); 
      Write_Command(0x2E);          //Power Control Set 
      delay(1); 
-     Write_Command(0x2F);          //Power Control Set 
-     
+     Write_Command(0x2F);          //Power Control Set      
     
      delay(1);
      Write_Command(0xAF);          //Display ON
@@ -285,7 +293,6 @@ void Show_one_char(unsigned char xs,unsigned char page,char p)
 //-------------------------------------------------------------------
 void set_ch(byte nch)
 {
- 
   n = nch;
 //  digitalWrite(NV,(nch & 0x01));
   digitalWrite(N20K,((nch >> 1)& 0x01));
@@ -304,12 +311,12 @@ void set_ch(byte nch)
 ////////////////////////////////////
 void next_range()
 {
-      n+=2;
+    n+=2;
     if(n>MAX_DIAPAZON)
     { 
       n=1;
-     }
-     set_ch(n);
+    }
+    set_ch(n);
 } 
 ///////////////////////
 void prev_range()
@@ -322,23 +329,28 @@ void prev_range()
      set_ch(n);
 } 
 //-------------------------------------------------------------------
-//int z=0;
 volatile int num_aver;
 boolean fl_event;
 volatile boolean fl_int;   // flag interrupt
 volatile boolean flag_result_ready;
- 
 volatile unsigned long dout,av_dout;
 //-------------------------------------------------------------------
 void serialEvent()
 {
-  while (Serial.available()) {
+  boolean a = true;
+  
+  while (Serial.available())
+  {
     // get the new byte:
     char inChar = (char)Serial.read(); 
     // add it to the inputString:
     if ( (inChar == '\r') || (inChar == '\n')) {
       stringComplete = true;
-      
+      if(a)
+      {
+        pushCmd(inChar);
+        a = false;
+      }
     }
     else
     { 
@@ -348,6 +360,9 @@ void serialEvent()
     // so the main loop can do something about it:
  
   }
+  
+  Serial.println("OK");  // !!!!!!
+  
 }
 //-------------------------------------------------------------------
 void power_off()
@@ -418,7 +433,8 @@ void fready()
          av_dout = dout / NUM_AVERAGE;
          dout=0;
          num_aver=0;
-         flag_result_ready = true;   
+         flag_result_ready = true;      /// !!! not need
+         pushCmd(CMD_CALCULATE_POWER); 
       }  
       
   }
@@ -431,9 +447,28 @@ void fready()
 
 }  
 //////////////////////
-
+void updtateCoeffInEeprom(int addr)
+{
+  byte bw;  
+  for(byte i=0;i<MAX_NUM_WAVE;i++)
+  {
+    bw = calibr[i] >> 8;
+    EEPROM.write(addr + 2*i, bw);
+    bw = calibr[i] & 0xFF; 
+    EEPROM.write(addr + 2*i + 1, bw);  
+  }
+}
+//////////////////////
+void readCoeffFromEEPROM(int addr)
+{
+  for(byte i=0;i<MAX_NUM_WAVE;i++)
+  {
+    calibr[i] = (int)(EEPROM.read(addr + 2*i)) << 8 + (int)EEPROM.read(addr + 2*i + 1);
+  }   
+}
+//////////////////////
 void setup() {
-  // delay();
+
    pinMode(kill,OUTPUT);
    digitalWrite(kill,HIGH);
    
@@ -468,8 +503,8 @@ void setup() {
    
    pinMode(SCLK,OUTPUT);  // ADC
    pinMode(DOUT,INPUT);
-       dout = 0;
-      num_aver = 0;  
+   dout = 0;
+   num_aver = 0;  
    
    pinMode(N2M,OUTPUT);   // range
    pinMode(N20K,OUTPUT);
@@ -513,12 +548,20 @@ void setup() {
    attachInterrupt(digitalPinToInterrupt(DOUT), fready, RISING);
    pinMode(inter,INPUT);
    attachInterrupt(digitalPinToInterrupt(inter), power_off, LOW);  // !!!!
-   
+      
+   Timer1.initialize(100000); // set a timer of length 100000 microseconds (or 0.1 sec - or 10Hz => the led will blink 5 times, 5 cycles of on-and-off, per second)
+   Timer1.attachInterrupt( keyBoardCommand ); // attach the service routine here
    interrupts();
-   
    
    time2 = 0;
    time1 = 0;
+
+ #ifdef DEBUG 
+  Serial.println("Coeff:");  
+  for(byte i=0;i<MAX_NUM_WAVE;i++)
+    Serial.println(calibr[i]);      
+ #endif
+   
  /*  
    byte pz=0;
    Show_big_one_char(0,0,'0');
@@ -542,7 +585,242 @@ void setup() {
    */
 }
 
-void loop() {
+//////////////////////////////////////////////////////////////////////
+char readKeyBoard()
+{
+   char key=0;
+   digitalWrite(buttonV1,LOW);
+   digitalWrite(buttonV2,HIGH);
+ 
+  if(digitalRead(buttonH1)==LOW)  
+     key=CMD_KEY1; 
+  if(digitalRead(buttonH2)==LOW)  
+     key = CMD_KEY2;
+  if(digitalRead(buttonH3)==LOW)
+     key = CMD_KEY3;
+  
+  if(key==0)
+  {
+     digitalWrite(buttonV1,HIGH);
+     digitalWrite(buttonV2,LOW);
+  
+     if(digitalRead(buttonH1)==LOW)  
+       key=CMD_KEY4;
+     if(digitalRead(buttonH2)==LOW)  
+       key = CMD_KEY5;
+     if(digitalRead(buttonH3)==LOW)
+       key = CMD_KEY6;
+  }
+  if( (key!=0) && (fl_key_pressed==false) )
+  {
+     digitalWrite(BEEP,LOW);
+     delay(25);
+     digitalWrite(BEEP,HIGH);
+     fl_key_pressed = true;
+    
+  }
+  else
+  {
+    fl_key_pressed = false;
+    key = 0;
+  }
+  return key;
+}  
+//////////////////////////////////////////////////////////////////////
+void pushCmd(unsigned char c)
+{
+  if(posCurrent<MAX_CMD_IN_STACK)
+  {
+     posCurrent++;
+     stackCmd[posCurrent] = c;
+  }    
+}
+//////////////////////////////////////////////////////////////////////
+unsigned char popCmd()
+{
+  unsigned char c=0; 
+  if(posCurrent>0)
+  { 
+    c = stackCmd[posCurrent--];
+  }  
+  return c;
+}  
+//////////////////////////////////////////////////////////////////////
+// call auto from timer interruput 10Hz
+void keyBoardCommand()
+{
+   unsigned char cmd;
+   cmd = readKeyBoard();
+   if(cmd!=0)
+   {
+      pushCmd(cmd);   
+   }  
+} 
+//////////////////////////////////////////////////////////////////////
+void changeWaveLenght()
+{
+   num_wave++;
+   if(num_wave>MAX_NUM_WAVE) num_wave=0;
+   pushCmd(CMD_UPDATE_SCREEN);
+}  
+//////////////////////////////////////////////////////////////////////
+void changeFormat()
+{
+  flag_dBm = !flag_dBm;
+  pwr_db = pwr;
+  pushCmd(CMD_UPDATE_SCREEN);
+}
+//////////////////////////////////////////////////////////////////////    
+void turnVFL()
+{
+    if(fl_VFL)
+       digitalWrite(VFL,HIGH);  // TURN OFF        
+    else
+       digitalWrite(VFL,LOW); 
+       
+   fl_VFL = !fl_VFL;
+} 
+
+//////////////////////////////////////////////////////////////////////
+void switchBackLight()
+{
+   if(fl_backLight)
+       digitalWrite(LIGHT,LOW);  // TURN OFF        
+    else
+       digitalWrite(LIGHT,HIGH); 
+       
+   fl_backLight = !fl_backLight;  
+}  
+
+//////////////////////////////////////////////////////////////////////
+void setZero()
+{
+  
+}
+
+//////////////////////////////////////////////////////////////////////
+void updateScreen()
+{
+  #ifdef DEBUG   
+     Show_string(0,0,"     ");
+     Show_string(0,0,"Rng="+String(n));
+     
+     Show_string(0,1,"              ");
+     Show_string(0,1,"ADC="+String(av_dout)); // output ADC      
+     
+  #endif    
+       // output number wave
+     Show_string(36,0,"    ");
+     Show_string(36,0,String(wave[num_wave]));
+
+#ifndef DEBUG
+      if(flag_dBm)
+      {
+        Show_string(0,1,"Pwr="+String(pwr_db,2)+"dBm");
+      }
+      else
+      {
+        Show_string(0,1,"              ");
+      }
+#endif
+     
+  
+     if(pw>1000.0) // show power in Watt
+     {
+       Show_string(0,6,"Pwr="+String(pw/1000.0,2)+" uW  ");
+     }
+     else
+     {  
+       Show_string(0,6,"Pwr="+String(pw,2)+" nW  ");
+     }    
+     
+     
+     String pwr_str;     
+     pwr_str = String(pwr,2);
+          
+ // #ifdef DEBUG   
+     Show_string(0,5,"               ");
+     Show_string(0,5,"Pwr="+pwr_str+"dBm");
+//  #endif     
+
+     
+       // show battery status
+     int v;
+     v = analogRead(PIN_VOLTAGE);
+     vl = map(v,0,1023,0,6600);
+
+
+     Show_string(100,0,"    ");
+     Show_string(100,0,String(vl/1000,2));   
+}  
+
+//////////////////////////////////////////////////////////////////////
+void calculatePower()
+{
+   pw=av_dout/koef; // pw - power in nWatt
+   pwr = 10.0*log10(pw*1.0e-6);  // pwr - power in dBm
+   pwr = pwr + calibr[num_wave]/100.0;
+
+   pw = pow(10,pwr/10.0)*1.0e+6;  // power in nWatt
+   if(flag_dBm)
+   {
+       pwr = pwr - pwr_db;
+   } 
+   
+   if(av_dout>16777000)
+   {
+       prev_range();
+   } 
+   if((av_dout<7000) && (n!=MAX_DIAPAZON)) 
+   {
+       next_range();
+   }    
+   pushCmd(CMD_UPDATE_SCREEN);
+} 
+    
+//////////////////////////////////////////////////////////////////////
+void readResultToSerial()
+{
+  Serial.println("Result:");
+  Serial.println(num_wave);
+  Serial.println(pw);
+  Serial.println(pwr);  
+}
+
+
+//////////////////////////////////////////////////////////////////////
+void ciklReadCommand()
+{
+  unsigned char cmd;
+  cmd = popCmd();
+  if(cmd!=0)
+  {
+    switch (cmd)
+     {
+      case CMD_CALCULATE_POWER : { calculatePower(); break; } 
+      case CMD_UPDATE_SCREEN : { updateScreen(); break; }
+      case CMD_KEY1 : { changeWaveLenght(); break; }
+      case CMD_KEY2 : { turnVFL(); break; }
+      case CMD_KEY3 : { changeFormat(); break; }
+      case CMD_KEY4 : { switchBackLight(); break; }
+      case CMD_KEY5 : { setZero(); break; }
+      case CMD_KEY6 : { break; }
+
+      case CMD_STORE_COEFF : { updtateCoeffInEeprom(0); break;} 
+      case CMD_READ_RESULT : { readResultToSerial; break;}
+      
+     } 
+  }  
+}  
+
+//////////////////////////////////////////////////////////////////////
+void loop()
+{
+   ciklReadCommand();
+}  
+
+///////////////////////////////////
+void old_loop() {
   
    digitalWrite(buttonV1,LOW);
    digitalWrite(buttonV2,HIGH);
@@ -667,36 +945,7 @@ void loop() {
   
   
   
-/*  
-  if(digitalRead(inter)==LOW)
-  {
-        int i=0;
-        while( (i<800))
-       // for(int i=0;i<1600;i++)
-        {
-           delayMicroseconds(1000);
-           i++;
-           if(digitalRead(inter)==HIGH) break;
-        }
   
-     //  delay(2000);
-
-        if(i>=800)
-        {
-    
-           Display_Clear(0x00,0x00);
-         //  delay(200);
-           Show_string(40,4,"Good bye");
-           for(int j=0;j<1000;j++)
-         { 
-          delayMicroseconds(1000);
-         }    
-    
-        digitalWrite(kill,LOW);
-        }
-
-  }
-*/  
 
   time1 = millis();
   
