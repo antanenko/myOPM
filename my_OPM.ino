@@ -6,6 +6,7 @@
 #include "font.h"
 
 //#define DEBUG
+// test github change
 
 #define CMD_KEY1               'w'    // change wave
 #define CMD_KEY2               'f'    // VFL
